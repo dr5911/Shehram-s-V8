@@ -1,0 +1,204 @@
+import { Response } from 'express';
+import { AuthRequest } from '../middleware/auth';
+import { Earning, FacebookAccount, Content } from '../models';
+import { Op } from 'sequelize';
+import sequelize from '../config/database';
+
+export class EarningsController {
+  static async getEarnings(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user!.id;
+      const { accountId, startDate, endDate, type } = req.query;
+
+      const where: any = {};
+      
+      if (accountId) {
+        where.facebookAccountId = accountId;
+      }
+
+      if (startDate || endDate) {
+        where.earningDate = {};
+        if (startDate) where.earningDate[Op.gte] = new Date(startDate as string);
+        if (endDate) where.earningDate[Op.lte] = new Date(endDate as string);
+      }
+
+      if (type) {
+        where.earningType = type;
+      }
+
+      const earnings = await Earning.findAll({
+        where,
+        include: [
+          {
+            model: FacebookAccount,
+            where: { userId },
+            attributes: ['id', 'name', 'pageName'],
+          },
+          {
+            model: Content,
+            attributes: ['id', 'contentType', 'title'],
+          },
+        ],
+        order: [['earningDate', 'DESC']],
+      });
+
+      res.json({
+        success: true,
+        data: earnings,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  static async getEarningsSummary(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.user!.id;
+      const { accountId, period = 'month' } = req.query;
+
+      let startDate = new Date();
+      if (period === 'day') {
+        startDate.setDate(startDate.getDate() - 1);
+      } else if (period === 'week') {
+        startDate.setDate(startDate.getDate() - 7);
+      } else if (period === 'month') {
+        startDate.setMonth(startDate.getMonth() - 1);
+      } else if (period === 'year') {
+        startDate.setFullYear(startDate.getFullYear() - 1);
+      }
+
+      const where: any = {
+        earningDate: { [Op.gte]: startDate },
+      };
+
+      if (accountId) {
+        where.facebookAccountId = accountId;
+      }
+
+      const summary = await Earning.findAll({
+        where,
+        include: [
+          {
+            model: FacebookAccount,
+            where: { userId },
+            attributes: [],
+          },
+        ],
+        attributes: [
+          'earningType',
+          'currency',
+          [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
+          [sequelize.fn('COUNT', sequelize.col('Earning.id')), 'count'],
+        ],
+        group: ['earningType', 'currency'],
+        raw: true,
+      });
+
+      const totalEarnings = await Earning.sum('amount', {
+        where,
+        include: [
+          {
+            model: FacebookAccount,
+            where: { userId },
+            attributes: [],
+          },
+        ],
+      });
+
+      res.json({
+        success: true,
+        data: {
+          summary,
+          total: totalEarnings || 0,
+          period,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  static async getEarningsByContent(req: AuthRequest, res: Response) {
+    try {
+      const { contentId } = req.params;
+      const userId = req.user!.id;
+
+      const earnings = await Earning.findAll({
+        where: { contentId },
+        include: [
+          {
+            model: FacebookAccount,
+            where: { userId },
+          },
+          {
+            model: Content,
+          },
+        ],
+        order: [['earningDate', 'DESC']],
+      });
+
+      res.json({
+        success: true,
+        data: earnings,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+
+  static async createEarning(req: AuthRequest, res: Response) {
+    try {
+      const {
+        facebookAccountId,
+        contentId,
+        amount,
+        currency,
+        earningType,
+        earningDate,
+        transactionId,
+      } = req.body;
+      const userId = req.user!.id;
+
+      const account = await FacebookAccount.findOne({
+        where: { id: facebookAccountId, userId },
+      });
+
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: 'Account not found',
+        });
+      }
+
+      const earning = await Earning.create({
+        facebookAccountId,
+        contentId,
+        amount,
+        currency: currency || 'USD',
+        earningType,
+        earningDate: earningDate || new Date(),
+        transactionId,
+        status: 'completed',
+      });
+
+      res.status(201).json({
+        success: true,
+        data: earning,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+}
