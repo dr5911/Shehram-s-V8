@@ -1,21 +1,30 @@
-import { createClient } from 'redis';
+import Redis from 'ioredis';
+import { Logger } from '../utils/logger';
+
+const logger = Logger.getInstance();
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
-export const redisClient = createClient({
-  url: redisUrl,
-});
+export const redis = new Redis(redisUrl);
 
-redisClient.on('error', (err) => console.error('Redis Client Error', err));
-redisClient.on('connect', () => console.log('Redis Client Connected'));
-
-export const connectRedis = async () => {
+export const connectRedis = async (): Promise<void> => {
   try {
-    await redisClient.connect();
+    redis.on('connect', () => {
+      logger.info('Redis connected successfully');
+    });
+
+    redis.on('error', (error) => {
+      logger.error('Redis error', { error });
+    });
+
+    await redis.ping();
   } catch (error) {
-    console.error('Failed to connect to Redis:', error);
+    logger.error('Redis connection failed', { error });
     throw error;
   }
 };
 
-export default redisClient;
+process.on('SIGTERM', async () => {
+  logger.info('Closing Redis connection...');
+  await redis.quit();
+});
