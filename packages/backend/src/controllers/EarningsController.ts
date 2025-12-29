@@ -3,6 +3,8 @@ import { AuthRequest } from '../middleware/auth';
 import { Earning, FacebookAccount, Content } from '../models';
 import { Op } from 'sequelize';
 import sequelize from '../config/database';
+import { AppError, NotFoundError, ValidationError } from '../errors';
+import { handleSequelizeError } from '../utils/errorHelpers';
 
 export class EarningsController {
   static async getEarnings(req: AuthRequest, res: Response) {
@@ -18,11 +20,27 @@ export class EarningsController {
 
       if (startDate || endDate) {
         where.earningDate = {};
-        if (startDate) where.earningDate[Op.gte] = new Date(startDate as string);
-        if (endDate) where.earningDate[Op.lte] = new Date(endDate as string);
+        if (startDate) {
+          const start = new Date(startDate as string);
+          if (isNaN(start.getTime())) {
+            throw new ValidationError('Invalid startDate format');
+          }
+          where.earningDate[Op.gte] = start;
+        }
+        if (endDate) {
+          const end = new Date(endDate as string);
+          if (isNaN(end.getTime())) {
+            throw new ValidationError('Invalid endDate format');
+          }
+          where.earningDate[Op.lte] = end;
+        }
       }
 
       if (type) {
+        const validTypes = ['ad_revenue', 'subscription', 'stars', 'other'];
+        if (!validTypes.includes(type as string)) {
+          throw new ValidationError(`Invalid type. Must be one of: ${validTypes.join(', ')}`);
+        }
         where.earningType = type;
       }
 
@@ -47,10 +65,17 @@ export class EarningsController {
         data: earnings,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve earnings',
+        });
+      }
     }
   }
 
@@ -58,6 +83,11 @@ export class EarningsController {
     try {
       const userId = req.user!.id;
       const { accountId, period = 'month' } = req.query;
+
+      const validPeriods = ['day', 'week', 'month', 'year'];
+      if (!validPeriods.includes(period as string)) {
+        throw new ValidationError(`Invalid period. Must be one of: ${validPeriods.join(', ')}`);
+      }
 
       let startDate = new Date();
       if (period === 'day') {
@@ -117,10 +147,17 @@ export class EarningsController {
         },
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve earnings summary',
+        });
+      }
     }
   }
 
@@ -148,10 +185,17 @@ export class EarningsController {
         data: earnings,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve earnings by content',
+        });
+      }
     }
   }
 
@@ -168,37 +212,53 @@ export class EarningsController {
       } = req.body;
       const userId = req.user!.id;
 
+      if (!facebookAccountId || !amount || !earningType) {
+        throw new ValidationError('Missing required fields: facebookAccountId, amount, earningType');
+      }
+
+      if (typeof amount !== 'number' || amount < 0) {
+        throw new ValidationError('Amount must be a positive number');
+      }
+
       const account = await FacebookAccount.findOne({
         where: { id: facebookAccountId, userId },
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
-      const earning = await Earning.create({
-        facebookAccountId,
-        contentId,
-        amount,
-        currency: currency || 'USD',
-        earningType,
-        earningDate: earningDate || new Date(),
-        transactionId,
-        status: 'completed',
-      });
+      try {
+        const earning = await Earning.create({
+          facebookAccountId,
+          contentId,
+          amount,
+          currency: currency || 'USD',
+          earningType,
+          earningDate: earningDate || new Date(),
+          transactionId,
+          status: 'completed',
+        });
 
-      res.status(201).json({
-        success: true,
-        data: earning,
-      });
+        res.status(201).json({
+          success: true,
+          data: earning,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to create earning',
+        });
+      }
     }
   }
 }

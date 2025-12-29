@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { AuthRequest } from '../middleware/auth';
+import { AppError } from '../errors';
 
 export class AuthController {
   static async register(req: Request, res: Response) {
@@ -22,10 +23,17 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'An unexpected error occurred during registration',
+        });
+      }
     }
   }
 
@@ -43,24 +51,42 @@ export class AuthController {
         },
       });
     } catch (error: any) {
-      res.status(401).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'An unexpected error occurred during login',
+        });
+      }
     }
   }
 
   static async getProfile(req: AuthRequest, res: Response) {
     try {
+      if (!req.user) {
+        throw new Error('User not authenticated');
+      }
+
       res.json({
         success: true,
         data: req.user,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'An unexpected error occurred while fetching profile',
+        });
+      }
     }
   }
 
@@ -76,10 +102,17 @@ export class AuthController {
         message: 'Password updated successfully',
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'An unexpected error occurred while updating password',
+        });
+      }
     }
   }
 }

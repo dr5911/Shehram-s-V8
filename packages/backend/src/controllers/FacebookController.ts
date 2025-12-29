@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { FacebookService } from '../services/FacebookService';
 import { FacebookAccount } from '../models';
+import { AppError, NotFoundError } from '../errors';
+import { handleSequelizeError } from '../utils/errorHelpers';
 
 export class FacebookController {
   static async connectAccount(req: AuthRequest, res: Response) {
@@ -12,27 +14,38 @@ export class FacebookController {
       const tokenData = await FacebookService.exchangeCodeForToken(code, redirectUri);
       const profile = await FacebookService.getUserProfile(tokenData.access_token);
 
-      const [account] = await FacebookAccount.findOrCreate({
-        where: {
-          userId,
-          facebookId: profile.id,
-        },
-        defaults: {
-          name: profile.name,
-          accessToken: tokenData.access_token,
-          tokenExpiry: new Date(Date.now() + tokenData.expires_in * 1000),
-        },
-      });
+      try {
+        const [account] = await FacebookAccount.findOrCreate({
+          where: {
+            userId,
+            facebookId: profile.id,
+          },
+          defaults: {
+            name: profile.name,
+            accessToken: tokenData.access_token,
+            tokenExpiry: new Date(Date.now() + tokenData.expires_in * 1000),
+          },
+        });
 
-      res.json({
-        success: true,
-        data: account,
-      });
+        res.json({
+          success: true,
+          data: account,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to connect Facebook account',
+        });
+      }
     }
   }
 
@@ -48,10 +61,17 @@ export class FacebookController {
         data: accounts,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve Facebook accounts',
+        });
+      }
     }
   }
 
@@ -65,10 +85,7 @@ export class FacebookController {
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
       const result = await FacebookService.syncAccountData(accountId);
@@ -78,10 +95,17 @@ export class FacebookController {
         data: result,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to sync account data',
+        });
+      }
     }
   }
 
@@ -95,10 +119,7 @@ export class FacebookController {
       });
 
       if (!account || !account.pageId || !account.pageAccessToken) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found or not configured',
-        });
+        throw new NotFoundError('Account not found or not configured');
       }
 
       const status = await FacebookService.getMonetizationStatus(
@@ -111,10 +132,17 @@ export class FacebookController {
         data: status,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve monetization status',
+        });
+      }
     }
   }
 
@@ -129,10 +157,7 @@ export class FacebookController {
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
       const pageAccessToken = await FacebookService.getPageAccessToken(
@@ -151,10 +176,17 @@ export class FacebookController {
         data: account,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to update page information',
+        });
+      }
     }
   }
 }

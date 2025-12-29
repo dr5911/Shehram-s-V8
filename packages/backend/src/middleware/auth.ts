@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { User } from '../models';
+import { AuthenticationError, AuthorizationError } from '../errors';
 
 export interface AuthRequest extends Request {
   user?: User;
@@ -12,23 +13,39 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace('Bearer ', '');
 
     if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
+      throw new AuthenticationError('No token provided');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as { userId: string };
+    const secret = process.env.JWT_SECRET || 'secret';
+    const decoded = jwt.verify(token, secret) as { userId: string };
+    
     const user = await User.findByPk(decoded.userId);
 
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: 'Invalid token' });
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (!user.isActive) {
+      throw new AuthenticationError('Account is inactive');
     }
 
     req.user = user;
     next();
   } catch (error) {
-    return res.status(401).json({ error: 'Invalid token' });
+    if (error instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({ success: false, error: 'Invalid token' });
+    }
+    if (error instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({ success: false, error: 'Token expired' });
+    }
+    if (error instanceof AuthenticationError) {
+      return res.status(401).json({ success: false, error: error.message });
+    }
+    return res.status(401).json({ success: false, error: 'Authentication failed' });
   }
 };
 
@@ -38,7 +55,7 @@ export const requireAdmin = (
   next: NextFunction
 ) => {
   if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    throw new AuthorizationError('Admin access required');
   }
   next();
 };

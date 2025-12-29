@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../models';
+import { ValidationError, AuthenticationError, NotFoundError, ConflictError } from '../errors';
+import { handleSequelizeError } from '../utils/errorHelpers';
 
 export class AuthService {
   static generateToken(userId: string): string {
@@ -15,59 +17,145 @@ export class AuthService {
     firstName: string;
     lastName: string;
   }) {
-    const existingUser = await User.findOne({ where: { email: data.email } });
-    
-    if (existingUser) {
-      throw new Error('User already exists');
+    if (!data.email || !data.password || !data.firstName || !data.lastName) {
+      throw new ValidationError('All fields are required');
     }
 
-    const user = await User.create(data);
-    const token = this.generateToken(user.id);
+    if (!this.isValidEmail(data.email)) {
+      throw new ValidationError('Invalid email format');
+    }
 
-    return { user, token };
+    if (data.password.length < 8) {
+      throw new ValidationError('Password must be at least 8 characters long');
+    }
+
+    try {
+      const existingUser = await User.findOne({ where: { email: data.email } });
+      
+      if (existingUser) {
+        throw new ConflictError('User with this email already exists', { field: 'email' });
+      }
+
+      const user = await User.create(data);
+      const token = this.generateToken(user.id);
+
+      return { user, token };
+    } catch (error: any) {
+      if (error instanceof ValidationError || error instanceof ConflictError) {
+        throw error;
+      }
+      handleSequelizeError(error);
+    }
   }
 
   static async login(email: string, password: string) {
-    const user = await User.findOne({ where: { email } });
-
-    if (!user || !user.password) {
-      throw new Error('Invalid credentials');
+    if (!email || !password) {
+      throw new ValidationError('Email and password are required');
     }
 
-    const isValid = await user.comparePassword(password);
-
-    if (!isValid) {
-      throw new Error('Invalid credentials');
+    if (!this.isValidEmail(email)) {
+      throw new ValidationError('Invalid email format');
     }
 
-    if (!user.isActive) {
-      throw new Error('Account is inactive');
+    try {
+      const user = await User.findOne({ where: { email } });
+
+      if (!user) {
+        throw new AuthenticationError('Invalid email or password');
+      }
+
+      if (!user.password) {
+        throw new AuthenticationError('Account uses OAuth. Please login with Facebook.');
+      }
+
+      const isValid = await user.comparePassword(password);
+
+      if (!isValid) {
+        throw new AuthenticationError('Invalid email or password');
+      }
+
+      if (!user.isActive) {
+        throw new AuthenticationError('Account is inactive. Please contact support.');
+      }
+
+      user.lastLogin = new Date();
+      await user.save();
+
+      console.log(`User login successful: ${user.id} (${user.email})`);
+
+      const token = this.generateToken(user.id);
+
+      return { user, token };
+    } catch (error: any) {
+      if (error instanceof ValidationError || error instanceof AuthenticationError) {
+        console.log(`Failed login attempt for email: ${email}`, {
+          reason: error.message,
+        });
+        throw error;
+      }
+      handleSequelizeError(error);
     }
-
-    user.lastLogin = new Date();
-    await user.save();
-
-    const token = this.generateToken(user.id);
-
-    return { user, token };
   }
 
   static async updatePassword(userId: string, oldPassword: string, newPassword: string) {
-    const user = await User.findByPk(userId);
-
-    if (!user || !user.password) {
-      throw new Error('User not found');
+    if (!oldPassword || !newPassword) {
+      throw new ValidationError('Current password and new password are required');
     }
 
-    const isValid = await user.comparePassword(oldPassword);
-
-    if (!isValid) {
-      throw new Error('Invalid current password');
+    if (newPassword.length < 8) {
+      throw new ValidationError('New password must be at least 8 characters long');
     }
 
-    user.password = newPassword;
-    await user.save();
+    try {
+      const user = await User.findByPk(userId);
 
-    return user;
+      if (!user) {
+        throw new NotFoundError('User not found');
+      }
+
+      if (!user.password) {
+        throw new ValidationError('Account uses OAuth. Cannot update password.');
+      }
+
+      const isValid = await user.comparePassword(oldPassword);
+
+      if (!isValid) {
+        throw new AuthenticationError('Current password is incorrect');
+      }
+
+      user.password = newPassword;
+      await user.save();
+
+      console.log(`Password updated for user: ${userId}`);
+
+      return user;
+    } catch (error: any) {
+      if (error instanceof ValidationError || error instanceof AuthenticationError || error instanceof NotFoundError) {
+        throw error;
+      }
+      handleSequelizeError(error);
+    }
+  }
+
+  static verifyToken(token: string): { userId: string } {
+    const secret = process.env.JWT_SECRET || 'secret';
+    
+    try {
+      const decoded = jwt.verify(token, secret) as { userId: string };
+      return decoded;
+    } catch (error: any) {
+      if (error.name === 'TokenExpiredError') {
+        throw new AuthenticationError('Token has expired');
+      }
+      if (error.name === 'JsonWebTokenError') {
+        throw new AuthenticationError('Invalid token');
+      }
+      throw new AuthenticationError('Authentication failed');
+    }
+  }
+
+  private static isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   }
 }

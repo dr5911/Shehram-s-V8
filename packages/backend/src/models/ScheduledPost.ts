@@ -98,6 +98,18 @@ export class ScheduledPost extends Model {
   publishedAt?: Date;
 
   @Column({
+    type: DataType.INTEGER,
+    defaultValue: 0,
+  })
+  retryCount?: number;
+
+  @Column({
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  lastRetryAt?: Date;
+
+  @Column({
     type: DataType.JSONB,
     defaultValue: {},
   })

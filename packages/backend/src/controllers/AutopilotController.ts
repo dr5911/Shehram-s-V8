@@ -3,6 +3,8 @@ import { AuthRequest } from '../middleware/auth';
 import { AutopilotService } from '../services/AutopilotService';
 import { AutopilotSettings, ScheduledPost, TrendResearch, FacebookAccount } from '../models';
 import { Op } from 'sequelize';
+import { AppError, NotFoundError, ValidationError } from '../errors';
+import { handleSequelizeError } from '../utils/errorHelpers';
 
 export class AutopilotController {
   static async getSettings(req: AuthRequest, res: Response) {
@@ -15,32 +17,40 @@ export class AutopilotController {
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
-      const [settings] = await AutopilotSettings.findOrCreate({
-        where: {
-          userId,
-          facebookAccountId: accountId,
-        },
-        defaults: {
-          userId,
-          facebookAccountId: accountId,
-        },
-      });
+      try {
+        const [settings] = await AutopilotSettings.findOrCreate({
+          where: {
+            userId,
+            facebookAccountId: accountId,
+          },
+          defaults: {
+            userId,
+            facebookAccountId: accountId,
+          },
+        });
 
-      res.json({
-        success: true,
-        data: settings,
-      });
+        res.json({
+          success: true,
+          data: settings,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve autopilot settings',
+        });
+      }
     }
   }
 
@@ -54,34 +64,42 @@ export class AutopilotController {
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
-      const [settings] = await AutopilotSettings.findOrCreate({
-        where: {
-          userId,
-          facebookAccountId: accountId,
-        },
-        defaults: {
-          userId,
-          facebookAccountId: accountId,
-        },
-      });
+      try {
+        const [settings] = await AutopilotSettings.findOrCreate({
+          where: {
+            userId,
+            facebookAccountId: accountId,
+          },
+          defaults: {
+            userId,
+            facebookAccountId: accountId,
+          },
+        });
 
-      await settings.update(req.body);
+        await settings.update(req.body);
 
-      res.json({
-        success: true,
-        data: settings,
-      });
+        res.json({
+          success: true,
+          data: settings,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to update autopilot settings',
+        });
+      }
     }
   }
 
@@ -98,10 +116,17 @@ export class AutopilotController {
         data: trends,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to research trending topics',
+        });
+      }
     }
   }
 
@@ -118,7 +143,11 @@ export class AutopilotController {
       }
 
       if (minScore) {
-        where.trendScore = { [Op.gte]: parseInt(minScore as string) };
+        const parsedScore = parseInt(minScore as string);
+        if (isNaN(parsedScore)) {
+          throw new ValidationError('Invalid minScore value');
+        }
+        where.trendScore = { [Op.gte]: parsedScore };
       }
 
       const trends = await TrendResearch.findAll({
@@ -132,16 +161,27 @@ export class AutopilotController {
         data: trends,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve trending topics',
+        });
+      }
     }
   }
 
   static async generateContent(req: AuthRequest, res: Response) {
     try {
       const { topic, targetAudience, contentType } = req.body;
+
+      if (!topic) {
+        throw new ValidationError('Topic is required');
+      }
 
       const ideas = await AutopilotService.generateContentIdeas(
         topic,
@@ -154,16 +194,31 @@ export class AutopilotController {
         data: ideas,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to generate content ideas',
+        });
+      }
     }
   }
 
   static async predictPerformance(req: AuthRequest, res: Response) {
     try {
       const { content, hashtags, historicalData } = req.body;
+
+      if (!content) {
+        throw new ValidationError('Content is required');
+      }
+
+      if (!hashtags || !Array.isArray(hashtags)) {
+        throw new ValidationError('Hashtags must be an array');
+      }
 
       const prediction = await AutopilotService.predictPostPerformance(
         content,
@@ -176,16 +231,27 @@ export class AutopilotController {
         data: prediction,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to predict post performance',
+        });
+      }
     }
   }
 
   static async generateHashtags(req: AuthRequest, res: Response) {
     try {
       const { content, niche } = req.body;
+
+      if (!content) {
+        throw new ValidationError('Content is required');
+      }
 
       const hashtags = await AutopilotService.generateHashtags(content, niche);
 
@@ -194,10 +260,17 @@ export class AutopilotController {
         data: hashtags,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to generate hashtags',
+        });
+      }
     }
   }
 
@@ -211,10 +284,7 @@ export class AutopilotController {
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
       const posts = await AutopilotService.scheduleAutoPosts(accountId);
@@ -224,10 +294,17 @@ export class AutopilotController {
         data: posts,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to schedule auto posts',
+        });
+      }
     }
   }
 
@@ -243,6 +320,10 @@ export class AutopilotController {
       }
 
       if (status) {
+        const validStatuses = ['pending', 'processing', 'published', 'failed', 'cancelled'];
+        if (!validStatuses.includes(status as string)) {
+          throw new ValidationError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+        }
         where.status = status;
       }
 
@@ -257,10 +338,17 @@ export class AutopilotController {
         data: posts,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve scheduled posts',
+        });
+      }
     }
   }
 
@@ -276,36 +364,57 @@ export class AutopilotController {
         scheduledFor,
       } = req.body;
 
+      if (!facebookAccountId || !content || !contentType || !scheduledFor) {
+        throw new ValidationError('Missing required fields: facebookAccountId, content, contentType, scheduledFor');
+      }
+
+      const scheduledDate = new Date(scheduledFor);
+      if (isNaN(scheduledDate.getTime())) {
+        throw new ValidationError('Invalid scheduledFor date');
+      }
+
+      if (scheduledDate < new Date()) {
+        throw new ValidationError('Scheduled time must be in the future');
+      }
+
       const account = await FacebookAccount.findOne({
         where: { id: facebookAccountId, userId },
       });
 
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: 'Account not found',
-        });
+        throw new NotFoundError('Account not found');
       }
 
-      const post = await ScheduledPost.create({
-        userId,
-        facebookAccountId,
-        content,
-        contentType,
-        mediaUrls,
-        hashtags,
-        scheduledFor: new Date(scheduledFor),
-      });
+      try {
+        const post = await ScheduledPost.create({
+          userId,
+          facebookAccountId,
+          content,
+          contentType,
+          mediaUrls,
+          hashtags,
+          scheduledFor: scheduledDate,
+        });
 
-      res.status(201).json({
-        success: true,
-        data: post,
-      });
+        res.status(201).json({
+          success: true,
+          data: post,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to create scheduled post',
+        });
+      }
     }
   }
 
@@ -319,17 +428,11 @@ export class AutopilotController {
       });
 
       if (!post) {
-        return res.status(404).json({
-          success: false,
-          error: 'Post not found',
-        });
+        throw new NotFoundError('Post not found');
       }
 
       if (post.status !== 'pending') {
-        return res.status(400).json({
-          success: false,
-          error: 'Cannot cancel post with current status',
-        });
+        throw new ValidationError('Cannot cancel post with current status');
       }
 
       post.status = 'cancelled';
@@ -340,10 +443,17 @@ export class AutopilotController {
         data: post,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to cancel scheduled post',
+        });
+      }
     }
   }
 
@@ -358,10 +468,17 @@ export class AutopilotController {
         data: times,
       });
     } catch (error: any) {
-      res.status(400).json({
-        success: false,
-        error: error.message,
-      });
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve optimal posting times',
+        });
+      }
     }
   }
 }
