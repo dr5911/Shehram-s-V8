@@ -78,8 +78,12 @@ export class AuthService {
         throw new AuthenticationError('Account is inactive. Please contact support.');
       }
 
-      user.lastLogin = new Date();
-      await user.save();
+      try {
+        user.lastLogin = new Date();
+        await user.save();
+      } catch (error: any) {
+        console.error(`Failed to update user last login: ${user.id}`, error.message);
+      }
 
       console.log(`User login successful: ${user.id} (${user.email})`);
 

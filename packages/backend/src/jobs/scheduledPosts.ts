@@ -52,10 +52,16 @@ async function processScheduledPost(post: ScheduledPost): Promise<void> {
       post.status = 'processing';
       post.retryCount = (post.retryCount || 0) + 1;
       post.lastRetryAt = new Date();
-      await post.save();
+
+      try {
+        await post.save();
+      } catch (saveError: any) {
+        console.error(`Failed to update post status to processing: ${post.id}`, saveError.message);
+        throw new DatabaseError('Failed to update post status', { postId: post.id });
+      }
 
       await AutopilotService.executeScheduledPost(post.id);
-      
+
       console.log(`✅ Successfully published scheduled post: ${post.id}`);
       return;
 
