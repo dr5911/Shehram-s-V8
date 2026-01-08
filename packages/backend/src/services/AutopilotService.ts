@@ -307,17 +307,22 @@ Return as JSON array.`;
     try {
       post.status = 'processing';
       await post.save();
+    } catch (error: any) {
+      console.error(`Failed to update post status to processing: ${postId}`, error.message);
+      throw new DatabaseError('Failed to update post status', { postId });
+    }
 
-      const account = post.facebookAccount;
-      if (!account || !account.pageId || !account.pageAccessToken) {
-        throw new AppError('Account not properly configured', 400, true, { 
-          postId, 
-          hasAccount: !!account,
-          hasPageId: !!account?.pageId,
-          hasAccessToken: !!account?.pageAccessToken,
-        });
-      }
+    const account = post.facebookAccount;
+    if (!account || !account.pageId || !account.pageAccessToken) {
+      throw new AppError('Account not properly configured', 400, true, {
+        postId,
+        hasAccount: !!account,
+        hasPageId: !!account?.pageId,
+        hasAccessToken: !!account?.pageAccessToken,
+      });
+    }
 
+    try {
       const result = await FacebookService.publishPost(
         account.pageId,
         account.pageAccessToken,
@@ -337,7 +342,7 @@ Return as JSON array.`;
           name: error.name,
         });
       }
-      
+
       throw error;
     }
   }

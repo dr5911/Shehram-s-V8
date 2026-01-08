@@ -1,4 +1,4 @@
-import { AppError, ExternalServiceError } from '../errors';
+import { AppError, ExternalServiceError, RateLimitError } from '../errors';
 
 export interface RetryOptions {
   maxAttempts?: number;

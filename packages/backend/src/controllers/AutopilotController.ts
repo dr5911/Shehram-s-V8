@@ -435,13 +435,17 @@ export class AutopilotController {
         throw new ValidationError('Cannot cancel post with current status');
       }
 
-      post.status = 'cancelled';
-      await post.save();
+      try {
+        post.status = 'cancelled';
+        await post.save();
 
-      res.json({
-        success: true,
-        data: post,
-      });
+        res.json({
+          success: true,
+          data: post,
+        });
+      } catch (error: any) {
+        handleSequelizeError(error);
+      }
     } catch (error: any) {
       if (error instanceof AppError) {
         res.status(error.statusCode).json({
